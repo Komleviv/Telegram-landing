@@ -1,0 +1,6 @@
+img/
+vendor/
+composer*
+help.php
+MadelineProto.log
+session.madeline*
