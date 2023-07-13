@@ -1,63 +1,92 @@
 <?php
-include 'madeline_scripts.php';
+// Подключаем библиотеку MadelineProto
+require_once 'vendor/autoload.php';
+require 'MadelineScripts.php';
+require 'config/config.php';
+
+use TelegramApiServer\Exceptions\NoMediaException;
 
 // Адрес Telegram-канала
-$telegram = 'smart_deco';
+$telegram = $config['telegram'];
+$session = MadelineScripts::connect();
 
 $source = '';
    
-$messages = get_messages($telegram, 0, 11);
-//var_dump ($messages);
-foreach(array_reverse($messages) as $i => $message) { 
-//var_dump ($messages);
- $media = get_images($message);
- $source .= "<div class='message_container'>";
- $source .= "<div class='message_title'><a href='https://t.me/". $telegram ."' target='_blank'>Smart-deco</a></div>";
- 
- // Если в сообщение есть изображение добавляем его к выводу
- if (!empty($message['media']['photo'])) {
- // Ищем по id картинки .webp файл в каталоге /img
-     $photo_id = glob('img/' . $message['media']['photo']['id']  . '*.webp');
-     if (!empty($photo_id)) {
-        $source .= "<div class='message_img'><a href='https://t.me/". $telegram ."/" . $message['id'] ."' target='_blank'><img src='" . $photo_id[0] ."' class='img_width'></a></div>";
+$messages = MadelineScripts::getMessages($session, $telegram, 200, 11);
+
+foreach(array_reverse($messages) as $i => $message) {
+    if (!$message || $message['_'] === 'messageEmpty') {
+        throw new NoMediaException('Пустое сообщение');
+    }
+
+    if (!MadelineScripts::hasMedia($message, true)) {
+        throw new NoMediaException('В сообщении нет медиа контента');
+        continue;
+    }
+
+    MadelineScripts::getMedia($session, $message);
+
+    $source .= "<div class='message_container'>";
+    $source .= "<div class='message_title'><a href='https://t.me/". $telegram ."' target='_blank'>Smart-deco</a></div>";
+
+    // Если в сообщение есть изображение добавляем его к выводу
+    if (!empty($message['media']['photo'])) {
+    // Ищем по id картинки .webp файл в каталоге /img
+        $photoID = $message['media']['photo']['id'];
+        $photoSrc = glob('img/' . $photoID  . '*.webp');
+        if (!empty($photoID)) {
+        $source .= "<div class='message_img'><a href='https://t.me/". $telegram ."/" . $message['id'] ."' target='_blank'><img src='" . $photoSrc[0] ."' class='img_width'></a></div>";
+        }
+    }
+
+     // Если в сообщение есть видео добавляем его к выводу
+     if (!empty($message['media']['document'])) {
+         $videoId = $message['media']['document']['id'];
+         if (MadelineScripts::isSmallFile($message)) {
+             $videoSrc = glob('img/*' . $videoId . '*.mp4');
+             $mimeType = $message['media']['document']['mime_type'] ?: 'video/mp4';
+             $source .= "<div class='message_video'>
+                        <video class='header__background-inner' width='500px' preload='' muted='' autoplay='' loop='' playsinline='' id='" . $videoId . "'>
+                            <source src='" . $videoSrc[0] . "' type='" . $mimeType . "'>
+                        </video>
+                      </div>";
+         } else {
+             $source .= "<div class='message_big_video'>
+                            <div class='text_big_video'>Видео очень большое.</div>
+                            <div class='link_big_video'><a href='https://t.me/". $telegram ."/" . $message['id'] ."'>Посмотреть в Telegram</a></div>
+                         </div>";
+         }
      }
-}
-  
- // Если в сообщение есть видео добавляем его к выводу
- if (!empty($message['media']['document'])) {
-     $source .=  "<div class='message_video'><video class='header__background-inner' width='500px' autoplay='true' loop='true' id='bgvid'>
-                    <source src='img/BTCa-2.pdf_5339189363098001938.mp4' type='video/mp4'>
-                  </video></div>";
- }
- 
-  
-//   if (!empty($message['entities'])) {
-//     foreach ($message['entities'] as $j => $decorate) {
-//      $message_string = $message['message'];
-//      if ($message['entities'][$j]['_'] == 'messageEntityBold' ) { 
-//        for ($st1 = 1; $st1 <= $message['entities'][$j]['offset']; $st1++) {
-//         $str1 .= $message_string[$st1];
-//        }
-//        echo $str1;
-// //          $message_decorate = mb_substr($message_string, $message['entities'][$j]['offset']-1,  $message['entities'][$j]['length']) . '<br>';
-//      }
-//     }
-//  }
-  
-  
-  $source .= "<div class='message'><pre>" . $message['message']. "</pre></div>";
- if (isset($message['entities'][0]['url'])) {
-   $source .= "<div class='message_url'><a href='". $message['entities'][0]['url'] ."' target='_blank'>" . $message['entities'][0]['url']. "</a></div>";
- }
- $source .= "<div class='message_bottom'><div class='bottom_block'><a href='https://t.me/". $telegram ."/" . $message['id'] ."' target='_blank'>t.me/". $telegram ."/" . $message['id'] ."</a></div><div class='bottom_block_right'><div class='message_view'>" . $message['views'] . "<svg class='view_icon' version='1.1' id='Layer_1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' x='0px' y='0px'
-	 viewBox='0 0 42 42' enable-background='new 0 0 42 42' xml:space='reserve'>
-<path d='M15.3,20.1c0,3.1,2.6,5.7,5.7,5.7s5.7-2.6,5.7-5.7s-2.6-5.7-5.7-5.7S15.3,17,15.3,20.1z M23.4,32.4
-	C30.1,30.9,40.5,22,40.5,22s-7.7-12-18-13.3c-0.6-0.1-2.6-0.1-3-0.1c-10,1-18,13.7-18,13.7s8.7,8.6,17,9.9
-	C19.4,32.6,22.4,32.6,23.4,32.4z M11.1,20.7c0-5.2,4.4-9.4,9.9-9.4s9.9,4.2,9.9,9.4S26.5,30,21,30S11.1,25.8,11.1,20.7z'/>
-</svg></div><span>" . date('j F Y H:i', $message['date']) ."</span></div></div>";
-  $source .= "</div>";
+
+
+    //   if (!empty($message['entities'])) {
+    //     foreach ($message['entities'] as $j => $decorate) {
+    //      $message_string = $message['message'];
+    //      if ($message['entities'][$j]['_'] == 'messageEntityBold' ) {
+    //        for ($st1 = 1; $st1 <= $message['entities'][$j]['offset']; $st1++) {
+    //         $str1 .= $message_string[$st1];
+    //        }
+    //        echo $str1;
+    // //          $message_decorate = mb_substr($message_string, $message['entities'][$j]['offset']-1,  $message['entities'][$j]['length']) . '<br>';
+    //      }
+    //     }
+    //  }
+
+
+      $source .= "<div class='message'><pre>" . $message['message']. "</pre></div>";
+     if (isset($message['entities'][0]['url'])) {
+       $source .= "<div class='message_url'><a href='". $message['entities'][0]['url'] ."' target='_blank'>" . $message['entities'][0]['url']. "</a></div>";
+     }
+     $source .= "<div class='message_bottom'><div class='bottom_block'><a href='https://t.me/". $telegram ."/" . $message['id'] ."' target='_blank'>t.me/". $telegram ."/" . $message['id'] ."</a></div><div class='bottom_block_right'><div class='message_view'>" . $message['views'] . "<svg class='view_icon' version='1.1' id='Layer_1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' x='0px' y='0px'
+         viewBox='0 0 42 42' enable-background='new 0 0 42 42' xml:space='reserve'>
+    <path d='M15.3,20.1c0,3.1,2.6,5.7,5.7,5.7s5.7-2.6,5.7-5.7s-2.6-5.7-5.7-5.7S15.3,17,15.3,20.1z M23.4,32.4
+        C30.1,30.9,40.5,22,40.5,22s-7.7-12-18-13.3c-0.6-0.1-2.6-0.1-3-0.1c-10,1-18,13.7-18,13.7s8.7,8.6,17,9.9
+        C19.4,32.6,22.4,32.6,23.4,32.4z M11.1,20.7c0-5.2,4.4-9.4,9.9-9.4s9.9,4.2,9.9,9.4S26.5,30,21,30S11.1,25.8,11.1,20.7z'/>
+    </svg></div><span>" . date('j F Y H:i', $message['date']) ."</span></div></div>";
+      $source .= "</div>";
  }
 
+MadelineScripts::stop($session);
 // require_once ('src/template.php');
 ?>
 <!doctype html>
