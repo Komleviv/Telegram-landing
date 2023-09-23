@@ -1,4 +1,5 @@
 img/
+src/extensions/
 vendor/
 composer*
 help.php
