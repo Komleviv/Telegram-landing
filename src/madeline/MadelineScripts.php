@@ -20,6 +20,8 @@ class MadelineScripts
 
         $this->source = $this->getMessagesContent($session, $messages);
 
+        $this->createMessageView();
+
         $this->stop($session);
     }
 
@@ -86,9 +88,9 @@ class MadelineScripts
      *
      * @return null | string
      */
-    public function getMessagesContent(API $session, array $messages = []) : null | string
+    public function getMessagesContent(API $session, array $messages = []) : null | array
     {
-        $source = $source ?? null;
+        $viewData = [];
 
         foreach (array_reverse($messages) as $i => $message)
         {
@@ -104,13 +106,78 @@ class MadelineScripts
 
             $this->getMedia($session, $message);
 
-            $source = $this->createMessageView($message, $source);
+            $id = $message['id'];
+
+            if (isset($message['grouped_id'])) {
+                foreach ($viewData as $viewId => $viewDatum) {
+                    if ($viewDatum['grouped_id'] == $message['grouped_id']) {
+                        $viewData[$viewId]['media']['photo'] += $this->setMediaPhoto($message) ?? [];
+                        $viewData[$viewId]['media']['document'] += $this->setMediaDocument($message) ?? [];
+
+                        continue 2;
+                    }
+                }
+            }
+
+            $viewData[$id]['message'] = $message['message'] ?? '';
+            $viewData[$id]['entities'] = $message['message'] ?? [];
+            $viewData[$id]['views'] = $message['views'] ?? null;
+            $viewData[$id]['date'] = $message['date'] ?? null;
+            $viewData[$id]['media']['photo'] = $viewData[$id]['media']['photo'] ?? [];
+            $viewData[$id]['media']['photo'] += $this->setMediaPhoto($message) ?? [];
+            $viewData[$id]['media']['document'] = $viewData[$id]['media']['document'] ?? [];
+            $viewData[$id]['media']['document'] += $this->setMediaDocument($message) ?? [];
+            $viewData[$id]['grouped_id'] = $message['grouped_id'] ?? null;
 
             unset($message);
         }
         unset($messages);
 
-        return $source;
+        return $viewData;
+    }
+
+    /**
+     * Выстраивает массив для отображения фото из сообщения
+     *
+     * @param array $message
+     *
+     * @return array|null
+     */
+    private static function setMediaPhoto($message) : array|null
+    {
+        if (isset($message['media']['photo'])) {
+            $photoId = $message['media']['photo']['id'];
+            $hasStickers = $message['media']['photo']['has_stickers'];
+            $date = $message['media']['photo']['date'];
+            $sizes = $message['media']['photo']['sizes'];
+            $result[$photoId] = ['has_stickers' => $hasStickers, 'date' => $date, 'sizes' => $sizes];
+
+            return $result;
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Выстраивает массив для отображения видео из сообщения
+     *
+     * @param array $message
+     *
+     * @return array|null
+     */
+    private static function setMediaDocument($message) : array|null
+    {
+        if (isset($message['media']['document'])) {
+            $videoId = $message['media']['document']['id'];
+            $mimeType = $message['media']['document']['mime_type'];
+            $date = $message['media']['document']['date'];
+            $sizes = $message['media']['document']['sizes'];
+            $result[$videoId] = ['mime_type' => $mimeType, 'date' => $date, 'sizes' => $sizes];
+
+            return $result;
+        } else {
+            return null;
+        }
     }
 
     /**
@@ -185,6 +252,7 @@ class MadelineScripts
      */
     private function createMessageView(array $message, null | string $source) : string
     {
+        $this->source;
         $source .= "<div class='message_container'>";
         $source .= "<div class='message_title'><a href='https://t.me/" . $this->config['telegram'] . "' target='_blank'>" . $this->config['group_name'] . "</a></div>";
 
