@@ -4,6 +4,7 @@ namespace madeline;
 use danog\MadelineProto\Exception;
 use danog\MadelineProto\StrTools;
 use danog\MadelineProto\API;
+use DataBase;
 
 class MadelineScripts
 {
@@ -20,7 +21,7 @@ class MadelineScripts
 
         $this->source = $this->getMessagesContent($session, $messages);
 
-        $this->createMessageView();
+        $this->source = $this->createMessageView();
 
         $this->stop($session);
     }
@@ -99,6 +100,8 @@ class MadelineScripts
                 throw new Exception('Пустое сообщение');
             }
 
+            $this->addMessageToDatabase($message);
+
             if (!$this->hasMedia($message, true)) {
                // throw new Exception('В сообщении нет медиа контента');
                 continue;
@@ -120,9 +123,9 @@ class MadelineScripts
             }
 
             $viewData[$id]['message'] = $message['message'] ?? '';
-            $viewData[$id]['entities'] = $message['message'] ?? [];
+            $viewData[$id]['entities'] = $message['entities'] ?? [];
             $viewData[$id]['views'] = $message['views'] ?? null;
-            $viewData[$id]['date'] = $message['date'] ?? null;
+            $viewData[$id]['message_date'] = $message['message_date'] ?? null;
             $viewData[$id]['media']['photo'] = $viewData[$id]['media']['photo'] ?? [];
             $viewData[$id]['media']['photo'] += $this->setMediaPhoto($message) ?? [];
             $viewData[$id]['media']['document'] = $viewData[$id]['media']['document'] ?? [];
@@ -250,58 +253,92 @@ class MadelineScripts
      *
      * @return string
      */
-    private function createMessageView(array $message, null | string $source) : string
+    private function createMessageView() : string
     {
-        $this->source;
-        $source .= "<div class='message_container'>";
-        $source .= "<div class='message_title'><a href='https://t.me/" . $this->config['telegram'] . "' target='_blank'>" . $this->config['group_name'] . "</a></div>";
+        $source = "";
 
-        // Если в сообщение есть изображение, добавляем его к выводу
-        if (!empty($message['media']['photo'])) {
-            $photoID = $message['media']['photo']['id'];
-            $photoSrc = glob('img/' . $photoID . '*.webp');
-            if (!empty($photoID)) {
-                $source .= "<div class='message_img'><a href='https://t.me/" . $this->config['telegram'] . "/" . $message['id'] . "' target='_blank'><img src='" . $photoSrc[0] . "' class='img_width'></a></div>";
+        foreach ($this->source as $postId => $post) {
+            $indicator = 0;
+
+            $source .= "<div class='message_container'>";
+            $source .= "<div class='message_title'><a href='https://t.me/" . $this->config['telegram'] . "' target='_blank'>" . $this->config['group_name'] . "</a></div>";
+
+            // Если в сообщение есть изображение или видео, формируем из них пост
+            if (!empty($post['media']['photo']) || !empty($post['media']['document'])) {
+                $source .= "<div class='swiper'>
+                                <div class='swiper-wrapper'>";
+
+                foreach ($post['media']['document'] as $documentID => $documentData) {
+                    if (MadelineScripts::isSmallFile($post)) {
+                        $videoSrc = glob('img/*' . $documentID . '*.mp4');
+                        $mimeType = $post['media']['document']['mime_type'] ?: 'video/mp4';
+                        $source .= "<div class='swiper-slide'><div class='message_video'>
+                                        <video class='header__background-inner' width='500px' preload='' muted='' autoplay='' loop='' playsinline='' id='" . $documentID . "'>
+                                            <source src='" . $videoSrc[0] . "' type='" . $mimeType . "'>
+                                        </video>
+                                      </div></div>";
+                    } else {
+                        $source .= "<div class='swiper-slide'><div class='message_big_video'>
+                                            <div class='text_big_video'>Видео очень большое.</div>
+                                            <div class='link_big_video'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "'>Посмотреть в Telegram</a></div>
+                                         </div></div>";
+                    }
+
+                    $indicator++;
+                }
+
+                foreach ($post['media']['photo'] as $photoID => $photoData) {
+                    $photoSrc = glob('img/' . $photoID . '*.webp');
+                    $source .= "<div class='swiper-slide'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "' target='_blank'><img src='" . $photoSrc[0] . "' class='img_width'></a></div>";
+                    $indicator++;
+                }
+
+                $source .= "</div>
+                            <div class='swiper-pagination'></div>
+                            <div class='swiper-button-prev'></div>
+                            <div class='swiper-button-next'></div>
+                            </div>";
             }
-        }
 
-        // Если в сообщение есть видео, добавляем его к выводу
-        if (!empty($message['media']['document'])) {
-            $videoId = $message['media']['document']['id'];
-            if (MadelineScripts::isSmallFile($message)) {
-                $videoSrc = glob('img/*' . $videoId . '*.mp4');
-                $mimeType = $message['media']['document']['mime_type'] ?: 'video/mp4';
-                $source .= "<div class='message_video'>
-                                    <video class='header__background-inner' width='500px' preload='' muted='' autoplay='' loop='' playsinline='' id='" . $videoId . "'>
-                                        <source src='" . $videoSrc[0] . "' type='" . $mimeType . "'>
-                                    </video>
-                                  </div>";
-            } else {
-                $source .= "<div class='message_big_video'>
-                                        <div class='text_big_video'>Видео очень большое.</div>
-                                        <div class='link_big_video'><a href='https://t.me/" . $this->config['telegram'] . "/" . $message['id'] . "'>Посмотреть в Telegram</a></div>
-                                     </div>";
+            // Если в сообщение есть форматирование, добавляем его к выводу
+            if (!empty($post['entities'])) {
+                $entities = $post['entities'];
+                $post['message'] = $this->formatMessage($post['message'], $entities);
             }
+
+            // Подвал сообщения
+            $source .= "<div class='message'><pre>" . $post['message'] . "</pre></div>";
+            if (isset($post['entities'][0]['url'])) {
+                $source .= "<div class='message_url'><a href='" . $post['entities'][0]['url'] . "' target='_blank'>" . $post['entities'][0]['url'] . "</a></div>";
+            }
+            $source .= "<div class='message_bottom'><div class='bottom_block'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "' target='_blank'>t.me/" . $this->config['telegram'] . "/" . $postId . "</a></div><div class='bottom_block_right'><div class='message_view'>" . $post['views'] . "<svg class='view_icon' version='1.1' id='Layer_1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' x='0px' y='0px'
+                         viewBox='0 0 42 42' enable-background='new 0 0 42 42' xml:space='reserve'>
+                    <path d='M15.3,20.1c0,3.1,2.6,5.7,5.7,5.7s5.7-2.6,5.7-5.7s-2.6-5.7-5.7-5.7S15.3,17,15.3,20.1z M23.4,32.4
+                        C30.1,30.9,40.5,22,40.5,22s-7.7-12-18-13.3c-0.6-0.1-2.6-0.1-3-0.1c-10,1-18,13.7-18,13.7s8.7,8.6,17,9.9
+                        C19.4,32.6,22.4,32.6,23.4,32.4z M11.1,20.7c0-5.2,4.4-9.4,9.9-9.4s9.9,4.2,9.9,9.4S26.5,30,21,30S11.1,25.8,11.1,20.7z'/>
+                    </svg></div><span>" . date('j F Y H:i', $post['message_date']) . "</span></div></div>";
+            $source .= "</div>";
         }
 
-        // Если в сообщение есть форматирование, добавляем его к выводу
-        if (!empty($message['entities'])) {
-            $entities = $message['entities'];
-            $message['message'] = $this->formatMessage($message['message'], $entities);
-        }
-
-        // Подвал сообщения
-        $source .= "<div class='message'><pre>" . $message['message'] . "</pre></div>";
-        if (isset($message['entities'][0]['url'])) {
-            $source .= "<div class='message_url'><a href='" . $message['entities'][0]['url'] . "' target='_blank'>" . $message['entities'][0]['url'] . "</a></div>";
-        }
-        $source .= "<div class='message_bottom'><div class='bottom_block'><a href='https://t.me/" . $this->config['telegram'] . "/" . $message['id'] . "' target='_blank'>t.me/" . $this->config['telegram'] . "/" . $message['id'] . "</a></div><div class='bottom_block_right'><div class='message_view'>" . $message['views'] . "<svg class='view_icon' version='1.1' id='Layer_1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' x='0px' y='0px'
-                     viewBox='0 0 42 42' enable-background='new 0 0 42 42' xml:space='reserve'>
-                <path d='M15.3,20.1c0,3.1,2.6,5.7,5.7,5.7s5.7-2.6,5.7-5.7s-2.6-5.7-5.7-5.7S15.3,17,15.3,20.1z M23.4,32.4
-                    C30.1,30.9,40.5,22,40.5,22s-7.7-12-18-13.3c-0.6-0.1-2.6-0.1-3-0.1c-10,1-18,13.7-18,13.7s8.7,8.6,17,9.9
-                    C19.4,32.6,22.4,32.6,23.4,32.4z M11.1,20.7c0-5.2,4.4-9.4,9.9-9.4s9.9,4.2,9.9,9.4S26.5,30,21,30S11.1,25.8,11.1,20.7z'/>
-                </svg></div><span>" . date('j F Y H:i', $message['date']) . "</span></div></div>";
-        $source .= "</div>";
+        $source .= "<script src='https://cdn.jsdelivr.net/npm/swiper@11.0.5/swiper-bundle.min.js'></script>
+                    <script>
+                         const swiper = new Swiper('.swiper', {
+                          // Optional parameters
+                          direction: 'horizontal',
+                          loop: true,
+                        
+                          // If we need pagination
+                          pagination: {
+                            el: '.swiper-pagination',
+                          },
+                        
+                          // Navigation arrows
+                          navigation: {
+                            nextEl: '.swiper-button-next',
+                            prevEl: '.swiper-button-prev',
+                          },
+                        });
+                    </script>";
 
         return $source;
     }
@@ -430,5 +467,32 @@ class MadelineScripts
             unlink($source);
 
         return $destination;
+    }
+
+    private function addMessageToDatabase($message) {
+        $id = $message['id'];
+
+        $db = new DataBase();
+
+        $channel = $this->config['telegram'];
+        if ($this->config['updating_messages']) {
+
+        } else {
+            $lastId = $db->lastMessageIdQuery($channel);
+
+            if ($lastId < $id) {
+                  $message_id = $message['id'];
+                  $message_message = mysqli_real_escape_string($db->db, $message['message']);
+                  $message_date = $message['date'];
+                  $views = $message['views'];
+                  $forwards = $message['forwards'];
+                  $grouped_id = $message['grouped_id'] ?? 0;
+                  $edit_date = $message['edit_date'];
+                  $sql = "INSERT INTO messages (channel, message_id, message, message_date, views, forwards, grouped_id, edit_date)
+                          VALUES ('$channel', $message_id, '$message_message', '$message_date', $views, $forwards, $grouped_id, '$edit_date')";
+
+                  $db->dbQuery($sql);
+            }
+        }
     }
 }

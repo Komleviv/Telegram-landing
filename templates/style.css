@@ -94,6 +94,7 @@ a:hover {
 
 .img_width {
   width: 500px;
+  height: 100%;
 }
 
 .message {
@@ -179,6 +180,19 @@ a:hover {
   margin: 0px 10px 0px 5px;
   fill: #738ca7;
   vertical-align: middle;
+}
+
+.swiper {
+  width: 500px;
+}
+
+.swiper-button-next:after, .swiper-button-prev:after{
+  --swiper-navigation-size: 14px;
+  color: white;
+}
+
+.swiper-pagination-bullet-active {
+  --swiper-pagination-color: white;
 }
 
 @media screen and (max-width: 580px) {

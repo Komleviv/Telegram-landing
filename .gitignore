@@ -2,6 +2,7 @@ img/
 src/extensions/
 vendor/
 composer*
+config/config.php
 help.php
 MadelineProto.log
 session.madeline*
