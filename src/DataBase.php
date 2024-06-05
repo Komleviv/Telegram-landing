@@ -40,14 +40,16 @@ class DataBase
     /**
      * Метод для выполнения вставки данных в базу данных
      * @param string $sql
-     * @return void
+     * @return string|int
      */
-    public function dbQuery(string $sql): void
+    public function dbQuery(string $sql): string|int
     {
         $query = $this->db->query($sql);
 
         if (!$query) {
             echo "Ошибка: " . $this->db->error;
+        } else {
+            return mysqli_insert_id($this->db);
         }
     }
 

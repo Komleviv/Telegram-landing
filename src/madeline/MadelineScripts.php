@@ -15,15 +15,23 @@ class MadelineScripts
     {
         $this->config = $config;
 
-        $session = $this->connect();
+        if ($this->config['data_source'] == 'database') {
+            $db = new DataBase();
 
-        $messages = $this->getMessages($session, $this->config['telegram'], 0, 20);
+            $sql = "SELECT * FROM messages WHERE channel = '" . $this->config['telegram'] . "' ORDER BY id";
 
-        $this->source = $this->getMessagesContent($session, $messages);
+            $this->source = $db->dbSelectQuery($sql);
+        } else {
+            $session = $this->connect();
+
+            $messages = $this->getMessages($session, $this->config['telegram'], 0, 20);
+
+            $this->source = $this->getMessageContent($session, $messages);
+
+            $this->stop($session);
+        }
 
         $this->source = $this->createMessageView();
-
-        $this->stop($session);
     }
 
     /**
@@ -89,7 +97,7 @@ class MadelineScripts
      *
      * @return null | string
      */
-    public function getMessagesContent(API $session, array $messages = []) : null | array
+    public function getMessageContent(API $session, array $messages = []) : null | array
     {
         $viewData = [];
 
@@ -100,14 +108,15 @@ class MadelineScripts
                 throw new Exception('Пустое сообщение');
             }
 
-            $this->addMessageToDatabase($message);
-
             if (!$this->hasMedia($message, true)) {
                // throw new Exception('В сообщении нет медиа контента');
                 continue;
             }
 
-            $this->getMedia($session, $message);
+            $mediaLink = $this->getMedia($session, $message);
+
+            $this->addMessageToDatabase($message, $mediaLink);
+
 
             $id = $message['id'];
 
@@ -174,7 +183,7 @@ class MadelineScripts
             $videoId = $message['media']['document']['id'];
             $mimeType = $message['media']['document']['mime_type'];
             $date = $message['media']['document']['date'];
-            $sizes = $message['media']['document']['sizes'];
+            $sizes = $message['media']['document']['size'];
             $result[$videoId] = ['mime_type' => $mimeType, 'date' => $date, 'sizes' => $sizes];
 
             return $result;
@@ -213,9 +222,9 @@ class MadelineScripts
      * @param API $session
      * @param array $message
      *
-     * @return void
+     * @return string
      */
-    public static function getMedia(API $session, array $message): void
+    public static function getMedia(API $session, array $message)
     {
         if (!empty($message['media'])) {
             if (!empty($message['media']['photo'])) {
@@ -223,24 +232,26 @@ class MadelineScripts
                 if (empty($glob[0])) {
                     $session->downloadToDir($message, getcwd() . '/img/');
 
-                    $glob_jpg = glob('img/' . $message['media']['photo']['id'] . '*.jpg');
-                    if (!empty($glob_jpg[0])) {
-                        self::webpImage($glob_jpg[0]);
+                    $globJpg = glob('img/' . $message['media']['photo']['id'] . '*.jpg');
+                    if (!empty($globJpg[0])) {
+                        $imgLink = self::webpImage($globJpg[0]);
+
+                        return $imgLink;
                     }
                 }
+
+                return $glob[0];
             } elseif (!empty($message['media']['document'])) {
                 $glob = glob('img/' . $message['media']['document']['id'] . '*.*');
                 if (empty($glob[0]) && self::isSmallFile($message)) {
                     $session->downloadToDir($message, getcwd() . '/img/');
-//                } elseif (empty($glob[0]) && !self::isSmallFile($message)) {
-//                    $session->downloadToDir($message['media']['document']['thumbs'][0]['bytes'], getcwd() . '/img/');
+                } elseif (empty($glob[0]) && !self::isSmallFile($message)) {
 
-                    // Преобразовываем скаченный файл в .webl и удаляем исходник
-//                    $glob_jpg = glob('img/' . $message['media']['document']['id'] . '*.jpg');
-//                    if (!empty($glob_jpg[0])) {
-//                        self::webpImage($glob_jpg[0]);
-//                    }
+                    return false;
+//                    $session->downloadToDir($message['media']['document']['thumbs'][0]['bytes'], getcwd() . '/img/');
                 }
+
+                return $glob[0] ?? null;
             }
         }
     }
@@ -263,54 +274,82 @@ class MadelineScripts
             $source .= "<div class='message_container'>";
             $source .= "<div class='message_title'><a href='https://t.me/" . $this->config['telegram'] . "' target='_blank'>" . $this->config['group_name'] . "</a></div>";
 
-            // Если в сообщение есть изображение или видео, формируем из них пост
-            if (!empty($post['media']['photo']) || !empty($post['media']['document'])) {
-                $source .= "<div class='swiper'>
-                                <div class='swiper-wrapper'>";
+            if ($this->config['data_source'] == 'database') {
+                if (!empty($post['media_link'])) {
+                    $source .= "<div class='swiper'>
+                                    <div class='swiper-wrapper'>";
 
-                foreach ($post['media']['document'] as $documentID => $documentData) {
-                    if (MadelineScripts::isSmallFile($post)) {
-                        $videoSrc = glob('img/*' . $documentID . '*.mp4');
-                        $mimeType = $post['media']['document']['mime_type'] ?: 'video/mp4';
-                        $source .= "<div class='swiper-slide'><div class='message_video'>
-                                        <video class='header__background-inner' width='500px' preload='' muted='' autoplay='' loop='' playsinline='' id='" . $documentID . "'>
-                                            <source src='" . $videoSrc[0] . "' type='" . $mimeType . "'>
-                                        </video>
-                                      </div></div>";
-                    } else {
-                        $source .= "<div class='swiper-slide'><div class='message_big_video'>
-                                            <div class='text_big_video'>Видео очень большое.</div>
-                                            <div class='link_big_video'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "'>Посмотреть в Telegram</a></div>
-                                         </div></div>";
+                    $source .= "<div class='swiper-slide'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "' target='_blank'><img src='" . $post['media_link'] . "' class='img_width'></a></div>";
+
+                    $source .= "</div>
+                                <div class='swiper-pagination'></div>
+                                <div class='swiper-button-prev'></div>
+                                <div class='swiper-button-next'></div>
+                                </div>";
+                }
+
+                // Если в сообщение есть форматирование, добавляем его к выводу
+                if (!empty($post['entities'])) {
+                    $entities = $post['entities'];
+                    $post['message'] = $this->formatMessage($post['message'], $entities);
+                }
+
+                // Подвал сообщения
+                $source .= "<div class='message'><pre>" . $post['message'] . "</pre></div>";
+                if (isset($post['entities'][0]['url'])) {
+                    $source .= "<div class='message_url'><a href='" . $post['entities'][0]['url'] . "' target='_blank'>" . $post['entities'][0]['url'] . "</a></div>";
+                }
+            } else {
+                // Если в сообщение есть изображение или видео, формируем из них пост
+                if (!empty($post['media']['photo']) || !empty($post['media']['document'])) {
+                    $source .= "<div class='swiper'>
+                                    <div class='swiper-wrapper'>";
+
+                    foreach ($post['media']['document'] as $documentID => $documentData) {
+                        if (MadelineScripts::isSmallFile($post, $documentID)) {
+                            $videoSrc = glob('img/*' . $documentID . '*.mp4');
+                            $mimeType = $post['media']['document']['mime_type'] ?: 'video/mp4';
+                            $source .= "<div class='swiper-slide'><div class='message_video'>
+                                            <video class='header__background-inner' width='500px' preload='' muted='' autoplay='' loop='' playsinline='' id='" . $documentID . "'>
+                                                <source src='" . $videoSrc[0] . "' type='" . $mimeType . "'>
+                                            </video>
+                                          </div></div>";
+                        } else {
+                            $source .= "<div class='swiper-slide'><div class='message_big_video'>
+                                                <div class='text_big_video'>Видео очень большое.</div>
+                                                <div class='link_big_video'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "'>Посмотреть в Telegram</a></div>
+                                             </div></div>";
+                        }
+
+                        $indicator++;
                     }
 
-                    $indicator++;
+                    foreach ($post['media']['photo'] as $photoID => $photoData) {
+                        $photoSrc = glob('img/' . $photoID . '*.webp');
+                        $source .= "<div class='swiper-slide'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "' target='_blank'><img src='" . $photoSrc[0] . "' class='img_width'></a></div>";
+                        $indicator++;
+                    }
+
+                    $source .= "</div>
+                                <div class='swiper-pagination'></div>
+                                <div class='swiper-button-prev'></div>
+                                <div class='swiper-button-next'></div>
+                                </div>";
                 }
 
-                foreach ($post['media']['photo'] as $photoID => $photoData) {
-                    $photoSrc = glob('img/' . $photoID . '*.webp');
-                    $source .= "<div class='swiper-slide'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "' target='_blank'><img src='" . $photoSrc[0] . "' class='img_width'></a></div>";
-                    $indicator++;
+                // Если в сообщение есть форматирование, добавляем его к выводу
+                if (!empty($post['entities'])) {
+                    $entities = $post['entities'];
+                    $post['message'] = $this->formatMessage($post['message'], $entities);
                 }
 
-                $source .= "</div>
-                            <div class='swiper-pagination'></div>
-                            <div class='swiper-button-prev'></div>
-                            <div class='swiper-button-next'></div>
-                            </div>";
+                // Подвал сообщения
+                $source .= "<div class='message'><pre>" . $post['message'] . "</pre></div>";
+                if (isset($post['entities'][0]['url'])) {
+                    $source .= "<div class='message_url'><a href='" . $post['entities'][0]['url'] . "' target='_blank'>" . $post['entities'][0]['url'] . "</a></div>";
+                }
             }
 
-            // Если в сообщение есть форматирование, добавляем его к выводу
-            if (!empty($post['entities'])) {
-                $entities = $post['entities'];
-                $post['message'] = $this->formatMessage($post['message'], $entities);
-            }
-
-            // Подвал сообщения
-            $source .= "<div class='message'><pre>" . $post['message'] . "</pre></div>";
-            if (isset($post['entities'][0]['url'])) {
-                $source .= "<div class='message_url'><a href='" . $post['entities'][0]['url'] . "' target='_blank'>" . $post['entities'][0]['url'] . "</a></div>";
-            }
             $source .= "<div class='message_bottom'><div class='bottom_block'><a href='https://t.me/" . $this->config['telegram'] . "/" . $postId . "' target='_blank'>t.me/" . $this->config['telegram'] . "/" . $postId . "</a></div><div class='bottom_block_right'><div class='message_view'>" . $post['views'] . "<svg class='view_icon' version='1.1' id='Layer_1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' x='0px' y='0px'
                          viewBox='0 0 42 42' enable-background='new 0 0 42 42' xml:space='reserve'>
                     <path d='M15.3,20.1c0,3.1,2.6,5.7,5.7,5.7s5.7-2.6,5.7-5.7s-2.6-5.7-5.7-5.7S15.3,17,15.3,20.1z M23.4,32.4
@@ -425,9 +464,14 @@ class MadelineScripts
      *
      * @return bool
      */
-    public static function isSmallFile(array $message = []) : bool
+    public static function isSmallFile(array $message = [], int $documentId = null) : bool
     {
-        $size = $message['media']['document']['size'];
+        if(!is_null($documentId))
+        {
+            $size = $message['media']['document'][$documentId]['sizes'];
+        } else {
+            $size = $message['media']['document']['size'];
+        }
         return $size < 1048576 ? true : false;
     }
 
@@ -469,7 +513,7 @@ class MadelineScripts
         return $destination;
     }
 
-    private function addMessageToDatabase($message) {
+    private function addMessageToDatabase($message, $mediaLink) {
         $id = $message['id'];
 
         $db = new DataBase();
@@ -481,17 +525,28 @@ class MadelineScripts
             $lastId = $db->lastMessageIdQuery($channel);
 
             if ($lastId < $id) {
-                  $message_id = $message['id'];
-                  $message_message = mysqli_real_escape_string($db->db, $message['message']);
-                  $message_date = $message['date'];
-                  $views = $message['views'];
-                  $forwards = $message['forwards'];
-                  $grouped_id = $message['grouped_id'] ?? 0;
-                  $edit_date = $message['edit_date'];
-                  $sql = "INSERT INTO messages (channel, message_id, message, message_date, views, forwards, grouped_id, edit_date)
-                          VALUES ('$channel', $message_id, '$message_message', '$message_date', $views, $forwards, $grouped_id, '$edit_date')";
+                $messageId = $message['id'];
+                $messageMessage = mysqli_real_escape_string($db->db, $message['message']);
+                $messageDate = $message['date'];
+                $views = $message['views'];
+                $forwards = $message['forwards'];
+                $groupedId = $message['grouped_id'] ?? 0;
+                $editDate = $message['edit_date'];
 
-                  $db->dbQuery($sql);
+                $sqlMessage = "INSERT INTO messages (channel, message_id, message, media_link, message_date, views, forwards, grouped_id, edit_date, create_date)
+                      VALUES ('$channel', $messageId, '$messageMessage', '$mediaLink', '$messageDate', $views, $forwards, $groupedId, '$editDate', now())";
+                $currentId = $db->dbQuery($sqlMessage);
+
+                foreach ($message['entities'] as $entityArray) {
+                    $entity = $entityArray['_'];
+                    $offset = $entityArray['offset'];
+                    $length = $entityArray['length'];
+                    $url = $entityArray['url'] ?? null;
+
+                    $sqlEntity = "INSERT INTO entities (message_id, entity_name, entity_offset, entity_length, entity_url)
+                      VALUES ($currentId, '$entity', $offset, $length, '$url')";
+                    $db->dbQuery($sqlEntity);
+                }
             }
         }
     }
